@@ -1,6 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // No usar output: "export" para que SSR funcione
+  reactStrictMode: true
 };
 
 module.exports = nextConfig;
