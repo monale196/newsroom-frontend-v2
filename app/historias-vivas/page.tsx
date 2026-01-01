@@ -50,7 +50,7 @@ export default function HistoriasVivas() {
   const [userVote, setUserVote] = useState<"like" | "dislike" | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const targetDate = new Date("2026-01-01T00:00:00");
+  const targetDate = new Date("2026-02-01T00:00:00");
 
   // --- Countdown y estado beforeNewYear ---
   const [countdown, setCountdown] = useState("");
