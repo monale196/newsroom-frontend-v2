@@ -1,17 +1,19 @@
 "use client";
 
-import { useEffect, useContext } from "react";
+import { useEffect } from "react";
 import { useSearchParams } from "next/navigation";
-import { SearchContext } from "../../app/layout"; // tu contexto de búsqueda
+import { useSearch } from "../../context/SearchContext";
 import SearchResultsPage from "../../components/SearchResultsPage";
+
+// 🔴 ESTO ES CLAVE: evita prerender
+export const dynamic = "force-dynamic";
 
 export default function BuscarPage() {
   const searchParams = useSearchParams();
   const keywordFromUrl = searchParams.get("keyword") || "";
 
-  const { keyword, setKeyword } = useContext(SearchContext);
+  const { keyword, setKeyword } = useSearch();
 
-  // Sincroniza la keyword de la URL con el SearchContext
   useEffect(() => {
     if (keywordFromUrl !== keyword) {
       setKeyword(keywordFromUrl);
