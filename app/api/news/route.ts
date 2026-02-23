@@ -1,5 +1,5 @@
 export const runtime = "nodejs";
-// app/api/news/route.ts
+
 import { NextResponse } from "next/server";
 import {
   S3Client,
@@ -8,11 +8,7 @@ import {
 } from "@aws-sdk/client-s3";
 
 const s3 = new S3Client({
-  region: process.env.AWS_REGION,
-  credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
-  },
+  region: process.env.AWS_REGION || "eu-north-1",
 });
 
 const BUCKET = "newsroomcache";
@@ -23,7 +19,7 @@ const S3_BASE_URL = `https://${BUCKET}.s3.eu-north-1.amazonaws.com/`;
 // --------------------------------------------------
 
 const streamToString = async (stream: any): Promise<string> => {
-  const chunks = [];
+  const chunks: any[] = [];
   for await (const chunk of stream) chunks.push(chunk);
   return Buffer.concat(chunks).toString("utf-8");
 };
@@ -37,8 +33,10 @@ const getTodayParts = () => {
   };
 };
 
-// Busca el último día disponible en S3
-const getLatestDay = async (year: string, month: string): Promise<string | null> => {
+const getLatestDay = async (
+  year: string,
+  month: string
+): Promise<string | null> => {
   const res = await s3.send(
     new ListObjectsV2Command({
       Bucket: BUCKET,
@@ -61,6 +59,7 @@ export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
 
+    const articleKey = searchParams.get("article");
     const latestOnly = searchParams.get("latestOnly");
     const lang = searchParams.get("lang") || "en";
     const sectionFilter = searchParams.get("section");
@@ -69,7 +68,34 @@ export async function GET(req: Request) {
     let month = searchParams.get("month");
     let day = searchParams.get("day");
 
-    // 📅 fecha automática
+    // --------------------------------------------------
+    // SINGLE ARTICLE
+    // --------------------------------------------------
+    if (articleKey) {
+      const txtObj = await s3.send(
+        new GetObjectCommand({
+          Bucket: BUCKET,
+          Key: articleKey,
+        })
+      );
+
+      const text = await streamToString(txtObj.Body);
+      const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+
+      return NextResponse.json({
+        article: {
+          id: articleKey,
+          title: lines[0] || "",
+          subtitle: lines[1] || "",
+          body: lines.slice(2).join("\n"),
+          txtUrl: `${S3_BASE_URL}${articleKey}`,
+        },
+      });
+    }
+
+    // --------------------------------------------------
+    // DATE RESOLUTION
+    // --------------------------------------------------
     if (!year || !month) {
       const today = getTodayParts();
       year = today.year;
@@ -78,13 +104,17 @@ export async function GET(req: Request) {
 
     if (!day) {
       const latestDay = await getLatestDay(year, month);
-      if (!latestDay) return NextResponse.json({ articles: [] });
+      if (!latestDay) {
+        return NextResponse.json({ articles: [] });
+      }
       day = latestDay;
     }
 
     const basePrefix = `data/news/${year}/${month}/${day}/${lang}/`;
 
-    // Listar secciones
+    // --------------------------------------------------
+    // LIST SECTIONS
+    // --------------------------------------------------
     const sectionsRes = await s3.send(
       new ListObjectsV2Command({
         Bucket: BUCKET,
@@ -98,8 +128,11 @@ export async function GET(req: Request) {
         p.Prefix!.replace(basePrefix, "").replace("/", "")
       ) || [];
 
-    const articles = [];
+    const articles: any[] = [];
 
+    // --------------------------------------------------
+    // LIST ARTICLES
+    // --------------------------------------------------
     for (const section of sections) {
       if (sectionFilter && section !== sectionFilter) continue;
 
@@ -116,44 +149,33 @@ export async function GET(req: Request) {
 
       const txtKey = files.find((f) => f.endsWith("article.txt"));
       const imageKey = files.find((f) => f.endsWith(".jpg"));
+
       if (!txtKey) continue;
 
-      // Leer TXT
       const txtObj = await s3.send(
         new GetObjectCommand({ Bucket: BUCKET, Key: txtKey })
       );
+
       const text = await streamToString(txtObj.Body);
-
-      // Extraer título y subtítulo: primeras dos líneas no vacías
       const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
-      const title = lines[0] || "";
-      const subtitle = lines[1] || "";
-
-      const imageUrl = imageKey ? `${S3_BASE_URL}${imageKey}` : undefined;
-      const txtUrl = txtKey ? `${S3_BASE_URL}${txtKey}` : undefined;
 
       articles.push({
+        id: txtKey,
         section,
-        title,
-        subtitle,
+        title: lines[0] || "",
+        subtitle: lines[1] || "",
         date: `${year}-${month}-${day}`,
-        txtUrl,
-        imageUrl,
-        url: `/secciones/${section}`,
+        txtUrl: `${S3_BASE_URL}${txtKey}`,
+        imageUrl: imageKey ? `${S3_BASE_URL}${imageKey}` : undefined,
+        url: `/articulo/${encodeURIComponent(txtKey)}`,
       });
     }
 
-    if (latestOnly) {
-      // homepage: solo 1 artículo por sección
-      return NextResponse.json({
-        articles,
-        date: `${year}-${month}-${day}`,
-      });
-    }
-
-    // histórico o sección específica
+    // --------------------------------------------------
+    // RESPONSE
+    // --------------------------------------------------
     return NextResponse.json({
-      articles,
+      articles: latestOnly ? articles.slice(0, sections.length) : articles,
       date: `${year}-${month}-${day}`,
       year,
       month,
